@@ -5,13 +5,18 @@
 #include <errno.h>
 #include "mpc.h"
 
-enum { LVAL_NUM, LVAR_ERR };
-enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
+enum { LVAL_NUM, LVAR_ERR, LVAL_FNUM };
+enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM, LERR_INVALID_OP_FMOD };
+
+#define EXTRACT_NUM(x) (long)((x).type == LVAL_NUM ? (x).num : (x).fnum)
+#define EXTRACT_FNUM(x) (double)((x).type == LVAL_NUM ? (x).num : (x).fnum)
+#define EXTRACT_VALUE(x) ((x).type == LVAL_NUM ? (x).num : (x).fnum)
 
 typedef struct {
   int type;
   union {
     long num;
+    double fnum;
     int err;
   };
 } lval;
@@ -22,6 +27,15 @@ lval_num(long x)
   lval v;
   v.type = LVAL_NUM;
   v.num = x;
+  return v;
+}
+
+lval
+lval_fnum(double x)
+{
+  lval v;
+  v.type = LVAL_FNUM;
+  v.fnum = x;
   return v;
 }
 
@@ -41,10 +55,13 @@ lval_print(lval v)
   case LVAL_NUM:
     printf("%li", v.num);
     break;
+  case LVAL_FNUM:
+    printf("%f", v.fnum);
+    break;    
   case LVAR_ERR:
     switch (v.err) {
     case LERR_BAD_OP:
-      printf("Error: Invalid operator.");
+       printf("Error: Invalid operator.");
       break;
     case LERR_BAD_NUM:
       printf("Error: Invalid number.");
@@ -52,6 +69,9 @@ lval_print(lval v)
     case LERR_DIV_ZERO:
       printf("Error: Division by zero.");
       break;
+    case LERR_INVALID_OP_FMOD:
+      printf("Error: float modulo.");
+      break;      
     default:
       printf("unknown error: %d", v.err);
         break;
@@ -65,24 +85,91 @@ lval_print(lval v)
 #define lval_println(x) { lval_print((x)); printf("\n"); }
 
 lval
+eval_add(lval x, lval y)
+{
+  if (x.type == LVAL_FNUM || y.type == LVAL_FNUM) {
+    // float
+    return lval_fnum(EXTRACT_FNUM(x) + EXTRACT_FNUM(y));
+  }
+  return lval_num(EXTRACT_NUM(x) + EXTRACT_NUM(y));
+}
+
+lval eval_minus(lval x, lval y)
+{
+  if (x.type == LVAL_FNUM || y.type == LVAL_FNUM) {
+    // float
+    return lval_fnum(EXTRACT_FNUM(x) - EXTRACT_FNUM(y));
+  }
+  return lval_num(EXTRACT_NUM(x) - EXTRACT_NUM(y));  
+}
+
+lval eval_mod(lval x, lval y) {
+  if (x.type == LVAL_FNUM || y.type == LVAL_FNUM) {
+    // float
+    return lval_err(LERR_INVALID_OP_FMOD);
+  }
+  return lval_num(EXTRACT_NUM(x) % EXTRACT_NUM(y));  
+}
+
+lval eval_mul(lval x, lval y) {
+  if (x.type == LVAL_FNUM || y.type == LVAL_FNUM) {
+    // float
+    return lval_fnum(EXTRACT_FNUM(x) * EXTRACT_FNUM(y));
+  }
+  return lval_num(EXTRACT_NUM(x) * EXTRACT_NUM(y));    
+}
+
+lval eval_div(lval x, lval y) {
+  if (EXTRACT_VALUE(y) == 0) {
+    return lval_err(LERR_DIV_ZERO);
+  }
+
+  if (x.type == LVAL_FNUM || y.type == LVAL_FNUM) {
+    // float
+    return lval_fnum(EXTRACT_FNUM(x) / EXTRACT_FNUM(y));
+  }
+  return lval_num(EXTRACT_NUM(x) / EXTRACT_NUM(y));    
+}
+
+lval eval_min(lval x, lval y) {  
+  if (x.type == LVAL_FNUM || y.type == LVAL_FNUM) {
+    // float
+    return lval_fnum(EXTRACT_VALUE(x) < EXTRACT_VALUE(y) ? EXTRACT_VALUE(x) : EXTRACT_VALUE(y));
+  }
+  return lval_num(EXTRACT_VALUE(x) < EXTRACT_VALUE(y) ? EXTRACT_VALUE(x) : EXTRACT_VALUE(y));
+}
+
+lval eval_max(lval x, lval y) {  
+  if (x.type == LVAL_FNUM || y.type == LVAL_FNUM) {
+    // float
+    return lval_fnum(EXTRACT_VALUE(x) > EXTRACT_VALUE(y) ? EXTRACT_VALUE(x) : EXTRACT_VALUE(y));
+  }
+  return lval_num(EXTRACT_VALUE(x) > EXTRACT_VALUE(y) ? EXTRACT_VALUE(x) : EXTRACT_VALUE(y));
+}
+
+lval eval_pow(lval x, lval y)
+{
+  if (x.type == LVAL_FNUM || y.type == LVAL_FNUM) {
+    // float
+    return lval_fnum(powl(EXTRACT_FNUM(x), EXTRACT_FNUM(y)));
+  }
+  return lval_num((long)powl(EXTRACT_FNUM(x), EXTRACT_FNUM(y)));
+}
+
+lval
 eval_op(lval x, const char *op, lval y)
 {
   if (x.type == LVAR_ERR) return x;
   if (y.type == LVAR_ERR) return y;
 
-  if (strcmp(op, "+") == 0) { return lval_num(x.num+y.num); }
-  if (strcmp(op, "-") == 0) { return lval_num(x.num-y.num); }
-  if (strcmp(op, "*") == 0) { return lval_num(x.num*y.num); }
-  if (strcmp(op, "%") == 0) { return lval_num(x.num%y.num); }
-  if (strcmp(op, "min") == 0) { return x.num > y.num ? y : x; }
-  if (strcmp(op, "max") == 0) { return x.num < y.num ? y : x; }
-  if (strcmp(op, "^") == 0) { return lval_num(powl(x.num, y.num)); }
-
-  if (strcmp(op, "/") == 0) {
-    if (y.num == 0)
-      return lval_err(LERR_DIV_ZERO);
-    return lval_num(x.num/y.num);
-  }
+  if (strcmp(op, "+") == 0) { return eval_add(x, y); }
+  if (strcmp(op, "-") == 0) { return eval_minus(x, y); }
+  if (strcmp(op, "*") == 0) { return eval_mul(x, y); }
+  if (strcmp(op, "%") == 0) { return eval_mod(x, y); }
+  if (strcmp(op, "min") == 0) { return eval_min(x, y); }
+  if (strcmp(op, "max") == 0) { return eval_max(x, y); }
+  if (strcmp(op, "^") == 0) { return eval_pow(x, y); }
+  if (strcmp(op, "/") == 0) { return eval_div(x, y); }
   
   return lval_err(LERR_BAD_OP);
 }
@@ -91,13 +178,27 @@ lval
 eval_unary(const char *op, lval x)
 {
   if (strcmp(op, "+") == 0) { return x; }
-  if (strcmp(op, "-") == 0) { return lval_num(-x.num); }
+  if (strcmp(op, "-") == 0) {
+    if (x.type == LVAL_FNUM) {
+      x.fnum = -x.fnum;
+    }
+    if (x.type == LVAL_NUM) {
+      x.num = -x.num;
+    }
+    return x;
+  };
   return lval_err(LERR_BAD_OP);
 }
 
 lval
 eval(mpc_ast_t *ast)
 {
+  if (strstr(ast->tag, "fnumber")) {
+    errno = 0;
+    double x = strtod(ast->contents, NULL);
+    return errno != ERANGE ? lval_fnum(x) : lval_err(LERR_BAD_NUM);
+  }
+  
   if (strstr(ast->tag, "number")) {
     errno = 0;
     long x = strtol(ast->contents, NULL, 10);
@@ -127,6 +228,7 @@ main(int argc, char **argv)
   puts("Press Ctrl+c to exit\n");
   
   mpc_parser_t* number   = mpc_new("number");
+  mpc_parser_t* fnumber   = mpc_new("fnumber");  
   mpc_parser_t* operator = mpc_new("operator");
   mpc_parser_t* expr     = mpc_new("expr");
   mpc_parser_t* lispy    = mpc_new("lispy");
@@ -134,11 +236,12 @@ main(int argc, char **argv)
   mpca_lang(MPCA_LANG_DEFAULT,
   "                                                                      \
   number   : /-?[0-9]+/ ;                                                \
+  fnumber   : /-?[0-9]+\\.[0-9]+/ ;                                         \
   operator : '%' | '+' | '-' | '*' | '/' | '^' | \"min\" | \"max\";      \
-  expr     : <number> | '(' <operator> <expr>+ ')' ; \
+  expr     : <fnumber> | <number> | '(' <operator> <expr>+ ')' ; \
   lispy    : /^/ <operator> <expr>+ /$/ ;            \
   ",
-  number, operator, expr, lispy);
+  number, fnumber, operator, expr, lispy);
 
   while (1) {
     char *input = readline("lispy> ");

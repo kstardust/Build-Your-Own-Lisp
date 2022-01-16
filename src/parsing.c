@@ -141,6 +141,16 @@ lval_add(lval *v, lval *x)
 }
 
 lval*
+lval_add_front(lval *v, lval *x)
+{
+  v->count++;
+  v->cell = realloc(v->cell, sizeof(lval*) * v->count);
+  memmove(v->cell+1, v->cell, sizeof(lval*) * (v->count-1));
+  v->cell[0] = x;
+  return v;
+}
+
+lval*
 lval_read(mpc_ast_t *t) {
   if (strstr(t->tag, "fnumber")) {
     return lval_read_fnum(t);
@@ -399,6 +409,41 @@ builtin_list(lval *a)
 }
 
 lval*
+builtin_len(lval *a)
+{
+  LASSERT(a, a->cell[0]->type == LVAL_QEXPR, "Function 'len' expects QEXPR.");
+
+  lval* v = lval_num(a->cell[0]->count);
+  lval_del(a);
+  return v;
+}
+
+lval*
+builtin_init(lval *a)
+{
+  LASSERT(a, a->count == 1, "Function 'init' accepts 1 argument.");
+  LASSERT(a, a->cell[0]->type == LVAL_QEXPR, "Function 'init' expects QEXPR.");
+  LASSERT(a, a->cell[0]->count != 0, "Function 'init' passed {}!");
+
+  lval* v = lval_take(a, 0);
+  lval_del(lval_pop(v, v->count-1));
+  return v;
+}
+
+lval*
+builtin_cons(lval *a)
+{
+  LASSERT(a, a->count == 2, "Function 'len' accepts 2 argument.");
+  LASSERT(a, a->cell[0]->type != LVAL_QEXPR, "Function 'len' expects a value as frist argument.");
+  LASSERT(a, a->cell[1]->type == LVAL_QEXPR, "Function 'len' expects QEXPR as second argument.");
+
+  lval *v = lval_pop(a, 0);
+  lval *qlist = lval_take(a, 0);
+  lval_add_front(qlist, v);
+  return qlist;
+}
+
+lval*
 builtin_eval(lval *a)
 {
   LASSERT(a, a->count == 1, "Function 'eval' accepts 1 argument.");
@@ -473,6 +518,12 @@ builtin(lval *a, const char *func)
 {
   if (strcmp(func, "head") == 0) {
     return builtin_head(a);
+  } else if (strcmp(func, "init") == 0) {
+    return builtin_init(a);
+  } else if (strcmp(func, "cons") == 0) {
+    return builtin_cons(a);
+  } else if (strcmp(func, "len") == 0) {
+    return builtin_len(a);
   } else if (strcmp(func, "tail") == 0) {
     return builtin_tail(a);
   } else if (strcmp(func, "list") == 0) {
@@ -549,7 +600,8 @@ main(int argc, char **argv)
       number   : /-?[0-9]+/ ;                                               \
       fnumber  : /-?[0-9]+\\.[0-9]+/ ;                                      \
       symbol   : '%' | '+' | '-' | '*' | '/' | '^' | \"min\" | \"max\"      \
-               | \"tail\" | \"list\" | \"head\" | \"eval\" | \"join\";      \
+               | \"tail\" | \"list\" | \"head\" | \"eval\" | \"join\"       \
+               | \"init\" | \"cons\" | \"len\";                              \
       sexpr    : '(' <expr>* ')' ;                                          \
       qexpr    : '{' <expr>* '}' ;                                          \
       expr     : <fnumber> | <number> | <symbol> | <sexpr> | <qexpr>;       \

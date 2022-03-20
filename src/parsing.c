@@ -46,8 +46,7 @@ enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM, LERR_INVALID_OP_FMOD };
           "'%s' passed incorrect type for argument %i. "                          \
           "Got %s, Expected Number.", (op), index, ltype_name((args)->cell[(index)]->type));
 
-#define LASSERT_EMPTY(op, args)                                 \
-  LASSERT((args), (args)->count != 0, "'%s' passed {}!", (op));
+#define LASSERT_EMPTY(op, args) LASSERT((args), (args)->count != 0, "'%s' passed {}!", (op));
 
 
 struct lval_s {
